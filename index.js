@@ -29,8 +29,8 @@ const client = new Client({
 });
 
 // Número principal y receptor
-const MAIN_NUMBER = '923838671@c.us'; // Número principal que recibe los mensajes
-const RECEIVER_NUMBER = '906040838@c.us'; // Número receptor al que se reenviarán los archivos
+const MAIN_NUMBER = '+51923838671@c.us'; // Número principal que recibe los mensajes
+const RECEIVER_NUMBER = '+51906040838@c.us'; // Número receptor al que se reenviarán los archivos
 
 // Mostrar QR en los logs de Render
 client.on('qr', (qr) => {
