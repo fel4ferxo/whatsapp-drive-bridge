@@ -1,5 +1,5 @@
 const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { google } = require('googleapis');
 const fs = require('fs');
@@ -41,8 +41,8 @@ client.on('ready', () => {
   console.log('WhatsApp conectado');
 });
 
-// Procesar mensajes entrantes
-client.on('message', async (msg) => {
+// Función para procesar mensajes (real o simulado)
+async function processMessage(msg) {
   try {
     // Verifica que el mensaje venga del número principal
     if (msg.from === MAIN_NUMBER) {
@@ -58,7 +58,7 @@ client.on('message', async (msg) => {
         // Subir a Google Drive
         const fileMetadata = {
           name: fileName,
-          parents: ['1QQ25ZXiOPn2TjImHL0gEvEu-nenlR6xS'], // ID de tu carpeta (ya está correcto)
+          parents: ['1QQ25ZXiOPn2TjImHL0gEvEu-nenlR6xS'],
         };
         const mediaUpload = {
           mimeType: msg.type === 'document' ? 'application/pdf' : 'image/jpeg',
@@ -77,13 +77,13 @@ client.on('message', async (msg) => {
         await client.sendMessage(RECEIVER_NUMBER, media, { caption: 'Archivo puenteado' });
         console.log(`Archivo reenviado a ${RECEIVER_NUMBER}`);
 
-        // Responder al usuario (evita parecer automatizado)
+        // Responder al usuario
         await msg.reply('Archivo recibido y subido a Drive. ¡Gracias!');
 
         // Eliminar archivo temporal
         fs.unlinkSync(tempFilePath);
       } else {
-        // Responder a mensajes no multimedia para simular interacción humana
+        // Responder a mensajes no multimedia
         if (!msg.isStatus && !msg.fromMe) {
           await msg.reply('Por favor, envía un PDF o imagen para procesar.');
         }
@@ -92,12 +92,58 @@ client.on('message', async (msg) => {
   } catch (error) {
     console.error('Error procesando mensaje:', error);
   }
+}
+
+// Procesar mensajes entrantes reales
+client.on('message', async (msg) => {
+  await processMessage(msg);
+});
+
+// Endpoint para simular un mensaje
+app.post('/simulate', async (req, res) => {
+  try {
+    const fileType = req.body.fileType || 'document'; // 'document' para PDF, 'image' para JPG
+    const filePath = fileType === 'document' ? 'test.pdf' : 'test.jpg';
+
+    // Verifica que el archivo exista
+    if (!fs.existsSync(filePath)) {
+      return res.status(400).send('Archivo de prueba no encontrado. Asegúrate de tener test.pdf o test.jpg en la raíz del proyecto.');
+    }
+
+    // Lee el archivo y crea un objeto MessageMedia
+    const fileData = fs.readFileSync(filePath, { encoding: 'base64' });
+    const media = new MessageMedia(
+      fileType === 'document' ? 'application/pdf' : 'image/jpeg',
+      fileData,
+      `test.${fileType === 'document' ? 'pdf' : 'jpg'}`
+    );
+
+    // Crea un mensaje simulado
+    const simulatedMessage = {
+      from: MAIN_NUMBER,
+      hasMedia: true,
+      type: fileType,
+      downloadMedia: async () => media,
+      reply: async (content) => {
+        console.log(`Respuesta simulada a ${MAIN_NUMBER}: ${content}`);
+        return true;
+      },
+    };
+
+    // Procesa el mensaje simulado
+    await processMessage(simulatedMessage);
+
+    res.status(200).send('Mensaje simulado enviado correctamente.');
+  } catch (error) {
+    console.error('Error al simular mensaje:', error);
+    res.status(500).send('Error al simular mensaje.');
+  }
 });
 
 // Evitar suspensión: Limitar tasa de mensajes salientes
 const RATE_LIMIT = {
-  maxMessages: 10, // Máximo 10 mensajes por hora
-  windowMs: 60 * 60 * 1000, // 1 hora
+  maxMessages: 10,
+  windowMs: 60 * 60 * 1000,
   messages: new Map(),
 };
 
@@ -110,7 +156,6 @@ async function checkRateLimit(chatId) {
   return recentMessages.length <= RATE_LIMIT.maxMessages;
 }
 
-// Modificar envío de mensajes para incluir límite de tasa
 const originalSendMessage = client.sendMessage;
 client.sendMessage = async (chatId, content, options) => {
   if (await checkRateLimit(chatId)) {
