@@ -29,8 +29,8 @@ const client = new Client({
 });
 
 // Número principal y receptor (con código de país +51 correctamente formateado)
-const MAIN_NUMBER = '923838671@c.us'; // Número principal que recibe los mensajes
-const RECEIVER_NUMBER = '51906040838@c.us'; // Número receptor al que se reenviarán los archivos
+const MAIN_NUMBER = '+51923838671@c.us'; // Número principal que recibe los mensajes
+const RECEIVER_NUMBER = '+51906040838@c.us'; // Número receptor al que se reenviarán los archivos
 
 // Mostrar QR en los logs de Render
 client.on('qr', (qr) => {
@@ -56,6 +56,8 @@ async function processMessage(msg) {
     // Verifica que el mensaje no sea del número principal ni del receptor (para evitar bucles)
     if (msg.from !== MAIN_NUMBER && msg.from !== RECEIVER_NUMBER) {
       if (msg.hasMedia && (msg.type === 'document' || msg.type === 'image')) {
+        console.log(`Procesando mensaje de ${msg.from}, tipo: ${msg.type}`);
+
         const media = await msg.downloadMedia();
         const fileExtension = msg.type === 'document' ? 'pdf' : 'jpg';
         const fileName = `file_${Date.now()}.${fileExtension}`;
@@ -82,7 +84,8 @@ async function processMessage(msg) {
         console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
         */
 
-        // Reenviar el archivo directamente al número receptor sin verificar el chat
+        // Reenviar el archivo directamente al número receptor
+        console.log(`Intentando reenviar mensaje a ${RECEIVER_NUMBER}`);
         await msg.forward(RECEIVER_NUMBER).catch(err => {
           console.error(`Error al reenviar mensaje a ${RECEIVER_NUMBER}:`, err);
           throw err;
@@ -90,14 +93,22 @@ async function processMessage(msg) {
         console.log(`Archivo reenviado a ${RECEIVER_NUMBER} como si lo enviara ${MAIN_NUMBER}`);
 
         // Responder al usuario
-        await msg.reply('Archivo recibido. ¡Gracias!');
+        console.log(`Intentando responder a ${msg.from}`);
+        await msg.reply('Archivo recibido. ¡Gracias!').catch(err => {
+          console.error(`Error al responder a ${msg.from}:`, err);
+          throw err;
+        });
+        console.log(`Respuesta enviada a ${msg.from}`);
 
         // Eliminar archivo temporal
         fs.unlinkSync(tempFilePath);
       } else {
         // Responder a mensajes no multimedia
         if (!msg.isStatus && !msg.fromMe) {
-          await msg.reply('Por favor, envía un PDF o imagen para procesar.');
+          await msg.reply('Por favor, envía un PDF o imagen para procesar.').catch(err => {
+            console.error(`Error al responder a ${msg.from}:`, err);
+            throw err;
+          });
         }
       }
     } else {
@@ -110,6 +121,7 @@ async function processMessage(msg) {
 
 // Procesar mensajes entrantes reales
 client.on('message', async (msg) => {
+  console.log('Mensaje real recibido:', msg.from, msg.type);
   await processMessage(msg);
 });
 
@@ -134,7 +146,7 @@ app.post('/simulate', async (req, res) => {
 
     // Crea un mensaje simulado (simulamos que viene del número de prueba +51 123 456 789)
     const simulatedMessage = {
-      from: '+51900813250@c.us', // Número de prueba como remitente
+      from: '+51123456789@c.us', // Número de prueba como remitente
       hasMedia: true,
       type: fileType,
       downloadMedia: async () => media,
@@ -149,9 +161,10 @@ app.post('/simulate', async (req, res) => {
     };
 
     // Procesa el mensaje simulado
+    console.log('Procesando mensaje simulado');
     await processMessage(simulatedMessage);
 
-    res.status(200).send('Mensaje simulado enviado correctamente.');
+    res.status(200).send('Mensaje simulado procesado correctamente. Nota: Esto es una simulación, el mensaje no se envía realmente a WhatsApp.');
   } catch (error) {
     console.error('Error al simular mensaje:', error);
     res.status(500).send('Error al simular mensaje.');
