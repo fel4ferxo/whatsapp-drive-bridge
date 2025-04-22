@@ -26,6 +26,10 @@ const client = new Client({
   },
 });
 
+// Número principal y receptor
+const MAIN_NUMBER = '923838671@c.us'; // Número principal que recibe los mensajes
+const RECEIVER_NUMBER = '906040838@c.us'; // Número receptor al que se reenviarán los archivos
+
 // Mostrar QR en los logs de Render
 client.on('qr', (qr) => {
   console.log('Escanea este QR con tu WhatsApp:');
@@ -40,42 +44,49 @@ client.on('ready', () => {
 // Procesar mensajes entrantes
 client.on('message', async (msg) => {
   try {
-    if (msg.hasMedia && (msg.type === 'document' || msg.type === 'image')) {
-      const media = await msg.downloadMedia();
-      const fileExtension = msg.type === 'document' ? 'pdf' : 'jpg';
-      const fileName = `file_${Date.now()}.${fileExtension}`;
-      const tempFilePath = path.join(__dirname, fileName);
+    // Verifica que el mensaje venga del número principal
+    if (msg.from === MAIN_NUMBER) {
+      if (msg.hasMedia && (msg.type === 'document' || msg.type === 'image')) {
+        const media = await msg.downloadMedia();
+        const fileExtension = msg.type === 'document' ? 'pdf' : 'jpg';
+        const fileName = `file_${Date.now()}.${fileExtension}`;
+        const tempFilePath = path.join(__dirname, fileName);
 
-      // Guardar archivo temporalmente
-      fs.writeFileSync(tempFilePath, Buffer.from(media.data, 'base64'));
+        // Guardar archivo temporalmente
+        fs.writeFileSync(tempFilePath, Buffer.from(media.data, 'base64'));
 
-      // Subir a Google Drive
-      const fileMetadata = {
-        name: fileName,
-        parents: ['1QQ25ZXiOPn2TjImHL0gEvEu-nenlR6xS'], // Reemplaza con el ID de tu carpeta
-      };
-      const mediaUpload = {
-        mimeType: msg.type === 'document' ? 'application/pdf' : 'image/jpeg',
-        body: fs.createReadStream(tempFilePath),
-      };
+        // Subir a Google Drive
+        const fileMetadata = {
+          name: fileName,
+          parents: ['1QQ25ZXiOPn2TjImHL0gEvEu-nenlR6xS'], // ID de tu carpeta (ya está correcto)
+        };
+        const mediaUpload = {
+          mimeType: msg.type === 'document' ? 'application/pdf' : 'image/jpeg',
+          body: fs.createReadStream(tempFilePath),
+        };
 
-      const uploadedFile = await drive.files.create({
-        resource: fileMetadata,
-        media: mediaUpload,
-        fields: 'id',
-      });
+        const uploadedFile = await drive.files.create({
+          resource: fileMetadata,
+          media: mediaUpload,
+          fields: 'id',
+        });
 
-      console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
+        console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
 
-      // Eliminar archivo temporal
-      fs.unlinkSync(tempFilePath);
+        // Reenviar el archivo al número receptor
+        await client.sendMessage(RECEIVER_NUMBER, media, { caption: 'Archivo puenteado' });
+        console.log(`Archivo reenviado a ${RECEIVER_NUMBER}`);
 
-      // Responder al usuario (evita parecer automatizado)
-      await msg.reply('Archivo recibido y subido a Drive. ¡Gracias!');
-    } else {
-      // Responder a mensajes no multimedia para simular interacción humana
-      if (!msg.isStatus && !msg.fromMe) {
-        await msg.reply('Por favor, envía un PDF o imagen para procesar.');
+        // Responder al usuario (evita parecer automatizado)
+        await msg.reply('Archivo recibido y subido a Drive. ¡Gracias!');
+
+        // Eliminar archivo temporal
+        fs.unlinkSync(tempFilePath);
+      } else {
+        // Responder a mensajes no multimedia para simular interacción humana
+        if (!msg.isStatus && !msg.fromMe) {
+          await msg.reply('Por favor, envía un PDF o imagen para procesar.');
+        }
       }
     }
   } catch (error) {
