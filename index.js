@@ -28,7 +28,7 @@ const client = new Client({
   },
 });
 
-// Número principal y receptor
+// Número principal y receptor (con código de país +51)
 const MAIN_NUMBER = '+51923838671@c.us'; // Número principal que recibe los mensajes
 const RECEIVER_NUMBER = '+51906040838@c.us'; // Número receptor al que se reenviarán los archivos
 
@@ -46,8 +46,8 @@ client.on('ready', () => {
 // Función para procesar mensajes (real o simulado)
 async function processMessage(msg) {
   try {
-    // Verifica que el mensaje venga del número principal
-    if (msg.from === MAIN_NUMBER) {
+    // Verifica que el mensaje no sea del número principal (para evitar bucles)
+    if (msg.from !== MAIN_NUMBER && msg.from !== RECEIVER_NUMBER) {
       if (msg.hasMedia && (msg.type === 'document' || msg.type === 'image')) {
         const media = await msg.downloadMedia();
         const fileExtension = msg.type === 'document' ? 'pdf' : 'jpg';
@@ -75,9 +75,13 @@ async function processMessage(msg) {
         console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
         */
 
-        // Reenviar el archivo al número receptor
-        await client.sendMessage(RECEIVER_NUMBER, media, { caption: 'Archivo puenteado' });
-        console.log(`Archivo reenviado a ${RECEIVER_NUMBER}`);
+        // Enviar un mensaje al receptor con el número del remitente original
+        const senderNumber = msg.from.split('@')[0]; // Extrae el número del remitente
+        await client.sendMessage(RECEIVER_NUMBER, `Enviado por: ${senderNumber}`);
+
+        // Reenviar el archivo al número receptor como si lo enviara el número principal
+        await msg.forward(RECEIVER_NUMBER);
+        console.log(`Archivo reenviado a ${RECEIVER_NUMBER} como si lo enviara ${MAIN_NUMBER}`);
 
         // Responder al usuario
         await msg.reply('Archivo recibido. ¡Gracias!');
@@ -90,6 +94,8 @@ async function processMessage(msg) {
           await msg.reply('Por favor, envía un PDF o imagen para procesar.');
         }
       }
+    } else {
+      console.log(`Mensaje ignorado: proviene de ${msg.from}, pero solo se procesan mensajes de otros números`);
     }
   } catch (error) {
     console.error('Error procesando mensaje:', error);
@@ -120,14 +126,18 @@ app.post('/simulate', async (req, res) => {
       `test.${fileType === 'document' ? 'pdf' : 'jpg'}`
     );
 
-    // Crea un mensaje simulado
+    // Crea un mensaje simulado (simulamos que viene de un número diferente)
     const simulatedMessage = {
-      from: MAIN_NUMBER,
+      from: '+51987654321@c.us', // Número simulado del remitente
       hasMedia: true,
       type: fileType,
       downloadMedia: async () => media,
       reply: async (content) => {
-        console.log(`Respuesta simulada a ${MAIN_NUMBER}: ${content}`);
+        console.log(`Respuesta simulada a ${simulatedMessage.from}: ${content}`);
+        return true;
+      },
+      forward: async (chatId) => {
+        console.log(`Simulación: Reenviando mensaje a ${chatId}`);
         return true;
       },
     };
