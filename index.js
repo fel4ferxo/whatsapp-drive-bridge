@@ -17,8 +17,8 @@ const client = new Client({
 });
 
 // Número principal y receptor
-const MAIN_NUMBER = '+51923838671@c.us';
-const RECEIVER_NUMBER = '+51906040838@c.us';
+const MAIN_NUMBER = '923838671@c.us';
+const RECEIVER_NUMBER = '906040838@c.us';
 
 // Mostrar QR en los logs de Render
 client.on('qr', (qr) => {
@@ -57,23 +57,32 @@ async function processMessage(msg) {
 
         fs.writeFileSync(tempFilePath, Buffer.from(media.data, 'base64'));
 
+        // Intentar enviar el archivo al receptor
         console.log(`Intentando enviar archivo a ${RECEIVER_NUMBER}`);
         const mediaToSend = new MessageMedia(
           msg.type === 'document' ? 'application/pdf' : 'image/jpeg',
           media.data,
           fileName
         );
-        await client.sendMessage(RECEIVER_NUMBER, mediaToSend).catch(err => {
+        let sendSuccess = true;
+        try {
+          await client.sendMessage(RECEIVER_NUMBER, mediaToSend);
+          console.log(`Archivo enviado a ${RECEIVER_NUMBER} desde ${MAIN_NUMBER}`);
+        } catch (err) {
           console.error(`Error al enviar archivo a ${RECEIVER_NUMBER}:`, err);
-          throw err;
-        });
-        console.log(`Archivo enviado a ${RECEIVER_NUMBER} desde ${MAIN_NUMBER}`);
+          sendSuccess = false;
+          // Notificar al usuario original que hubo un problema
+          await msg.reply('Archivo recibido, pero no se pudo enviar al receptor. Por favor, verifica que el número receptor esté registrado en WhatsApp.');
+        }
 
-        console.log(`Intentando responder a ${msg.from}`);
-        await msg.reply('Archivo recibido. ¡Gracias!').catch(err => {
-          console.error(`Error al responder a ${msg.from}:`, err);
-          throw err;
-        });
+        // Responder al usuario original si el envío fue exitoso
+        if (sendSuccess) {
+          console.log(`Intentando responder a ${msg.from}`);
+          await msg.reply('Archivo recibido. ¡Gracias!').catch(err => {
+            console.error(`Error al responder a ${msg.from}:`, err);
+            throw err;
+          });
+        }
 
         fs.unlinkSync(tempFilePath);
       } else {
