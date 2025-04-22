@@ -1,23 +1,11 @@
 const express = require('express');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 
 const app = express();
 app.use(express.json());
-
-// Configuración de Google Drive (temporalmente comentada)
-/*
-const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
-const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(__dirname, 'credentials.json'),
-  scopes: SCOPES,
-});
-const drive = google.drive({ version: 'v3', auth });
-*/
 
 // Configuración de whatsapp-web.js
 const client = new Client({
@@ -28,9 +16,9 @@ const client = new Client({
   },
 });
 
-// Número principal y receptor (con código de país +51 correctamente formateado)
-const MAIN_NUMBER = '+51923838671@c.us'; // Número principal que recibe los mensajes
-const RECEIVER_NUMBER = '+51906040838@c.us'; // Número receptor al que se reenviarán los archivos
+// Número principal y receptor
+const MAIN_NUMBER = '+51923838671@c.us';
+const RECEIVER_NUMBER = '+51906040838@c.us';
 
 // Mostrar QR en los logs de Render
 client.on('qr', (qr) => {
@@ -41,19 +29,23 @@ client.on('qr', (qr) => {
 // Confirmar conexión
 client.on('ready', () => {
   console.log('WhatsApp conectado');
+  // Inicializar el chat con el receptor
+  client.sendMessage(RECEIVER_NUMBER, 'Inicializando chat desde el bot').then(() => {
+    console.log(`Chat inicializado con ${RECEIVER_NUMBER}`);
+  }).catch(err => {
+    console.error(`Error al inicializar chat con ${RECEIVER_NUMBER}:`, err);
+  });
 });
 
 // Manejar desconexiones
 client.on('disconnected', (reason) => {
   console.log('Cliente desconectado:', reason);
-  // Intentar reconectar
   client.initialize();
 });
 
-// Función para procesar mensajes (real o simulado)
+// Procesar mensajes
 async function processMessage(msg) {
   try {
-    // Verifica que el mensaje no sea del número principal ni del receptor (para evitar bucles)
     if (msg.from !== MAIN_NUMBER && msg.from !== RECEIVER_NUMBER) {
       if (msg.hasMedia && (msg.type === 'document' || msg.type === 'image')) {
         console.log(`Procesando mensaje de ${msg.from}, tipo: ${msg.type}`);
@@ -63,56 +55,34 @@ async function processMessage(msg) {
         const fileName = `file_${Date.now()}.${fileExtension}`;
         const tempFilePath = path.join(__dirname, fileName);
 
-        // Guardar archivo temporalmente
         fs.writeFileSync(tempFilePath, Buffer.from(media.data, 'base64'));
 
-        // Subida a Google Drive (temporalmente comentada)
-        /*
-        const fileMetadata = {
-          name: fileName,
-          parents: ['1QQ25ZXiOPn2TjImHL0gEvEu-nenlR6xS'],
-        };
-        const mediaUpload = {
-          mimeType: msg.type === 'document' ? 'application/pdf' : 'image/jpeg',
-          body: fs.createReadStream(tempFilePath),
-        };
-        const uploadedFile = await drive.files.create({
-          resource: fileMetadata,
-          media: mediaUpload,
-          fields: 'id',
-        });
-        console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
-        */
-
-        // Reenviar el archivo directamente al número receptor
-        console.log(`Intentando reenviar mensaje a ${RECEIVER_NUMBER}`);
-        await msg.forward(RECEIVER_NUMBER).catch(err => {
-          console.error(`Error al reenviar mensaje a ${RECEIVER_NUMBER}:`, err);
+        console.log(`Intentando enviar archivo a ${RECEIVER_NUMBER}`);
+        const mediaToSend = new MessageMedia(
+          msg.type === 'document' ? 'application/pdf' : 'image/jpeg',
+          media.data,
+          fileName
+        );
+        await client.sendMessage(RECEIVER_NUMBER, mediaToSend).catch(err => {
+          console.error(`Error al enviar archivo a ${RECEIVER_NUMBER}:`, err);
           throw err;
         });
-        console.log(`Archivo reenviado a ${RECEIVER_NUMBER} como si lo enviara ${MAIN_NUMBER}`);
+        console.log(`Archivo enviado a ${RECEIVER_NUMBER} desde ${MAIN_NUMBER}`);
 
-        // Responder al usuario
         console.log(`Intentando responder a ${msg.from}`);
         await msg.reply('Archivo recibido. ¡Gracias!').catch(err => {
           console.error(`Error al responder a ${msg.from}:`, err);
           throw err;
         });
-        console.log(`Respuesta enviada a ${msg.from}`);
 
-        // Eliminar archivo temporal
         fs.unlinkSync(tempFilePath);
       } else {
-        // Responder a mensajes no multimedia
         if (!msg.isStatus && !msg.fromMe) {
-          await msg.reply('Por favor, envía un PDF o imagen para procesar.').catch(err => {
-            console.error(`Error al responder a ${msg.from}:`, err);
-            throw err;
-          });
+          await msg.reply('Por favor, envía un PDF o imagen para procesar.');
         }
       }
     } else {
-      console.log(`Mensaje ignorado: proviene de ${msg.from}, pero solo se procesan mensajes de otros números`);
+      console.log(`Mensaje ignorado: proviene de ${msg.from}`);
     }
   } catch (error) {
     console.error('Error procesando mensaje:', error);
@@ -128,15 +98,13 @@ client.on('message', async (msg) => {
 // Endpoint para simular un mensaje
 app.post('/simulate', async (req, res) => {
   try {
-    const fileType = req.body.fileType || 'document'; // 'document' para PDF, 'image' para JPG
+    const fileType = req.body.fileType || 'document';
     const filePath = fileType === 'document' ? 'test.pdf' : 'test.jpg';
 
-    // Verifica que el archivo exista
     if (!fs.existsSync(filePath)) {
       return res.status(400).send('Archivo de prueba no encontrado. Asegúrate de tener test.pdf o test.jpg en la raíz del proyecto.');
     }
 
-    // Lee el archivo y crea un objeto MessageMedia
     const fileData = fs.readFileSync(filePath, { encoding: 'base64' });
     const media = new MessageMedia(
       fileType === 'document' ? 'application/pdf' : 'image/jpeg',
@@ -144,9 +112,8 @@ app.post('/simulate', async (req, res) => {
       `test.${fileType === 'document' ? 'pdf' : 'jpg'}`
     );
 
-    // Crea un mensaje simulado (simulamos que viene del número de prueba +51 123 456 789)
     const simulatedMessage = {
-      from: '+51123456789@c.us', // Número de prueba como remitente
+      from: '+51123456789@c.us',
       hasMedia: true,
       type: fileType,
       downloadMedia: async () => media,
@@ -154,13 +121,8 @@ app.post('/simulate', async (req, res) => {
         console.log(`Respuesta simulada a ${simulatedMessage.from}: ${content}`);
         return true;
       },
-      forward: async (chatId) => {
-        console.log(`Simulación: Reenviando mensaje a ${chatId}`);
-        return true;
-      },
     };
 
-    // Procesa el mensaje simulado
     console.log('Procesando mensaje simulado');
     await processMessage(simulatedMessage);
 
@@ -170,35 +132,6 @@ app.post('/simulate', async (req, res) => {
     res.status(500).send('Error al simular mensaje.');
   }
 });
-
-// Evitar suspensión: Limitar tasa de mensajes salientes
-const RATE_LIMIT = {
-  maxMessages: 10,
-  windowMs: 60 * 60 * 1000,
-  messages: new Map(),
-};
-
-async function checkRateLimit(chatId) {
-  const now = Date.now();
-  const messages = RATE_LIMIT.messages.get(chatId) || [];
-  const recentMessages = messages.filter((time) => now - time < RATE_LIMIT.windowMs);
-  recentMessages.push(now);
-  RATE_LIMIT.messages.set(chatId, recentMessages);
-  return recentMessages.length <= RATE_LIMIT.maxMessages;
-}
-
-const originalSendMessage = client.sendMessage;
-client.sendMessage = async (chatId, content, options) => {
-  if (await checkRateLimit(chatId)) {
-    return originalSendMessage.call(client, chatId, content, options);
-  } else {
-    console.log(`Límite de mensajes alcanzado para ${chatId}`);
-    return null;
-  }
-};
-
-// Iniciar cliente de WhatsApp
-client.initialize();
 
 // Webhook para verificar el servidor
 app.get('/webhook', (req, res) => {
@@ -210,3 +143,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// Iniciar cliente de WhatsApp
+client.initialize();
