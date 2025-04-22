@@ -28,9 +28,9 @@ const client = new Client({
   },
 });
 
-// Número principal y receptor (con código de país +51)
-const MAIN_NUMBER = '51923838671@c.us'; // Número principal que recibe los mensajes
-const RECEIVER_NUMBER = '51906040838@c.us'; // Número receptor al que se reenviarán los archivos
+// Número principal y receptor (con código de país +51 correctamente formateado)
+const MAIN_NUMBER = '+51923838671@c.us'; // Número principal que recibe los mensajes
+const RECEIVER_NUMBER = '+51906040838@c.us'; // Número receptor al que se reenviarán los archivos
 
 // Mostrar QR en los logs de Render
 client.on('qr', (qr) => {
@@ -38,21 +38,9 @@ client.on('qr', (qr) => {
   qrcode.generate(qr, { small: true });
 });
 
-// Confirmar conexión y listar contactos para depuración
+// Confirmar conexión
 client.on('ready', () => {
   console.log('WhatsApp conectado');
-  // Verificar si el número receptor es accesible
-  client.getChats().then(chats => {
-    const receiverChat = chats.find(chat => chat.id._serialized === RECEIVER_NUMBER);
-    if (receiverChat) {
-      console.log(`Chat con ${RECEIVER_NUMBER} encontrado:`, receiverChat.id._serialized);
-    } else {
-      console.log(`No se encontró un chat con ${RECEIVER_NUMBER}. Asegúrate de que el número sea correcto y esté registrado en WhatsApp.`);
-      console.log('Intenta enviar un mensaje manual desde', MAIN_NUMBER, 'a', RECEIVER_NUMBER, 'para inicializar el chat.');
-    }
-  }).catch(err => {
-    console.error('Error al obtener chats:', err);
-  });
 });
 
 // Manejar desconexiones
@@ -94,13 +82,7 @@ async function processMessage(msg) {
         console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
         */
 
-        // Validar el chat receptor antes de enviar
-        const chat = await client.getChatById(RECEIVER_NUMBER).catch(err => {
-          console.error(`Error al obtener el chat con ${RECEIVER_NUMBER}:`, err);
-          throw new Error(`No se pudo acceder al chat con ${RECEIVER_NUMBER}`);
-        });
-
-        // Reenviar el archivo al número receptor como si lo enviara el número principal
+        // Reenviar el archivo directamente al número receptor sin verificar el chat
         await msg.forward(RECEIVER_NUMBER).catch(err => {
           console.error(`Error al reenviar mensaje a ${RECEIVER_NUMBER}:`, err);
           throw err;
@@ -152,7 +134,7 @@ app.post('/simulate', async (req, res) => {
 
     // Crea un mensaje simulado (simulamos que viene del número de prueba +51 123 456 789)
     const simulatedMessage = {
-      from: '51900813250@c.us', // Número de prueba como remitente
+      from: '+51123456789@c.us', // Número de prueba como remitente
       hasMedia: true,
       type: fileType,
       downloadMedia: async () => media,
