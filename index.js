@@ -9,13 +9,15 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-// Configuración de Google Drive
+// Configuración de Google Drive (temporalmente comentada)
+/*
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 const auth = new google.auth.GoogleAuth({
   keyFile: path.join(__dirname, 'credentials.json'),
   scopes: SCOPES,
 });
 const drive = google.drive({ version: 'v3', auth });
+*/
 
 // Configuración de whatsapp-web.js
 const client = new Client({
@@ -55,7 +57,8 @@ async function processMessage(msg) {
         // Guardar archivo temporalmente
         fs.writeFileSync(tempFilePath, Buffer.from(media.data, 'base64'));
 
-        // Subir a Google Drive
+        // Subida a Google Drive (temporalmente comentada)
+        /*
         const fileMetadata = {
           name: fileName,
           parents: ['1QQ25ZXiOPn2TjImHL0gEvEu-nenlR6xS'],
@@ -64,21 +67,20 @@ async function processMessage(msg) {
           mimeType: msg.type === 'document' ? 'application/pdf' : 'image/jpeg',
           body: fs.createReadStream(tempFilePath),
         };
-
         const uploadedFile = await drive.files.create({
           resource: fileMetadata,
           media: mediaUpload,
           fields: 'id',
         });
-
         console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
+        */
 
         // Reenviar el archivo al número receptor
         await client.sendMessage(RECEIVER_NUMBER, media, { caption: 'Archivo puenteado' });
         console.log(`Archivo reenviado a ${RECEIVER_NUMBER}`);
 
         // Responder al usuario
-        await msg.reply('Archivo recibido y subido a Drive. ¡Gracias!');
+        await msg.reply('Archivo recibido. ¡Gracias!');
 
         // Eliminar archivo temporal
         fs.unlinkSync(tempFilePath);
