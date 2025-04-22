@@ -29,8 +29,8 @@ const client = new Client({
 });
 
 // Número principal y receptor (con código de país +51 correctamente formateado)
-const MAIN_NUMBER = '+51923838671@c.us'; // Número principal que recibe los mensajes
-const RECEIVER_NUMBER = '+51906040838@c.us'; // Número receptor al que se reenviarán los archivos
+const MAIN_NUMBER = '923838671@c.us'; // Número principal que recibe los mensajes
+const RECEIVER_NUMBER = '51906040838@c.us'; // Número receptor al que se reenviarán los archivos
 
 // Mostrar QR en los logs de Render
 client.on('qr', (qr) => {
@@ -134,7 +134,7 @@ app.post('/simulate', async (req, res) => {
 
     // Crea un mensaje simulado (simulamos que viene del número de prueba +51 123 456 789)
     const simulatedMessage = {
-      from: '+51123456789@c.us', // Número de prueba como remitente
+      from: '+51900813250@c.us', // Número de prueba como remitente
       hasMedia: true,
       type: fileType,
       downloadMedia: async () => media,
