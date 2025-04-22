@@ -38,15 +38,34 @@ client.on('qr', (qr) => {
   qrcode.generate(qr, { small: true });
 });
 
-// Confirmar conexión
+// Confirmar conexión y listar contactos para depuración
 client.on('ready', () => {
   console.log('WhatsApp conectado');
+  // Verificar si el número receptor es accesible
+  client.getChats().then(chats => {
+    const receiverChat = chats.find(chat => chat.id._serialized === RECEIVER_NUMBER);
+    if (receiverChat) {
+      console.log(`Chat con ${RECEIVER_NUMBER} encontrado:`, receiverChat.id._serialized);
+    } else {
+      console.log(`No se encontró un chat con ${RECEIVER_NUMBER}. Asegúrate de que el número sea correcto y esté registrado en WhatsApp.`);
+      console.log('Intenta enviar un mensaje manual desde', MAIN_NUMBER, 'a', RECEIVER_NUMBER, 'para inicializar el chat.');
+    }
+  }).catch(err => {
+    console.error('Error al obtener chats:', err);
+  });
+});
+
+// Manejar desconexiones
+client.on('disconnected', (reason) => {
+  console.log('Cliente desconectado:', reason);
+  // Intentar reconectar
+  client.initialize();
 });
 
 // Función para procesar mensajes (real o simulado)
 async function processMessage(msg) {
   try {
-    // Verifica que el mensaje no sea del número principal (para evitar bucles)
+    // Verifica que el mensaje no sea del número principal ni del receptor (para evitar bucles)
     if (msg.from !== MAIN_NUMBER && msg.from !== RECEIVER_NUMBER) {
       if (msg.hasMedia && (msg.type === 'document' || msg.type === 'image')) {
         const media = await msg.downloadMedia();
@@ -75,12 +94,17 @@ async function processMessage(msg) {
         console.log(`Archivo subido a Drive: ${fileName}, ID: ${uploadedFile.data.id}`);
         */
 
-        // Enviar un mensaje al receptor con el número del remitente original
-        const senderNumber = msg.from.split('@')[0]; // Extrae el número del remitente
-        await client.sendMessage(RECEIVER_NUMBER, `Enviado por: ${senderNumber}`);
+        // Validar el chat receptor antes de enviar
+        const chat = await client.getChatById(RECEIVER_NUMBER).catch(err => {
+          console.error(`Error al obtener el chat con ${RECEIVER_NUMBER}:`, err);
+          throw new Error(`No se pudo acceder al chat con ${RECEIVER_NUMBER}`);
+        });
 
         // Reenviar el archivo al número receptor como si lo enviara el número principal
-        await msg.forward(RECEIVER_NUMBER);
+        await msg.forward(RECEIVER_NUMBER).catch(err => {
+          console.error(`Error al reenviar mensaje a ${RECEIVER_NUMBER}:`, err);
+          throw err;
+        });
         console.log(`Archivo reenviado a ${RECEIVER_NUMBER} como si lo enviara ${MAIN_NUMBER}`);
 
         // Responder al usuario
@@ -126,9 +150,9 @@ app.post('/simulate', async (req, res) => {
       `test.${fileType === 'document' ? 'pdf' : 'jpg'}`
     );
 
-    // Crea un mensaje simulado (simulamos que viene de un número diferente)
+    // Crea un mensaje simulado (simulamos que viene del número de prueba +51 123 456 789)
     const simulatedMessage = {
-      from: '51987654321@c.us', // Número simulado del remitente
+      from: '51900813250@c.us', // Número de prueba como remitente
       hasMedia: true,
       type: fileType,
       downloadMedia: async () => media,
