@@ -3,7 +3,7 @@ const qrcode = require('qrcode-terminal'); // Para mostrar el QR en los logs
 
 // Números principal y secundario
 const MAIN_NUMBER = '923838671'; // Sin el prefijo +
-const SECONDARY_NUMBER = '906040838'; // Sin el prefijo +
+const SECONDARY_NUMBER = '+51906040838'; // Sin el prefijo +
 
 async function connectToWhatsApp() {
   // Configurar la autenticación (almacenar en memoria o en /tmp para evitar problemas de permisos)
