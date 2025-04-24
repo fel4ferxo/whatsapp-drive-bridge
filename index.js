@@ -1,12 +1,12 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal'); // Para mostrar el QR en los logs
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const qrcode = require('qrcode-terminal');
 
 // Números principal y secundario
 const MAIN_NUMBER = '923838671'; // Sin el prefijo +
-const SECONDARY_NUMBER = '51906040838'; // Sin el prefijo +
+const SECONDARY_NUMBER = '51906040838'; // Número secundario fijo, con prefijo +51
 
 async function connectToWhatsApp() {
-  // Configurar la autenticación (almacenar en memoria o en /tmp para evitar problemas de permisos)
+  // Configurar la autenticación (almacenar en /tmp para evitar problemas de permisos en Render)
   const { state, saveCreds } = await useMultiFileAuthState('/tmp/whatsapp-auth');
 
   // Crear el cliente de WhatsApp
@@ -61,15 +61,72 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-        console.log(`Mensaje recibido de ${senderNumber}: ${messageContent}`);
+        // Manejar diferentes tipos de mensajes
+        let messageContent = '';
 
-        // Reenviar el mensaje al número secundario
-        try {
+        // Mensajes de texto
+        if (msg.message?.conversation) {
+          messageContent = msg.message.conversation;
+          console.log(`Mensaje de texto recibido de ${senderNumber}: ${messageContent}`);
           await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent });
-          console.log(`Mensaje reenviado a ${SECONDARY_NUMBER}: ${messageContent}`);
-        } catch (error) {
-          console.error(`Error al reenviar mensaje a ${SECONDARY_NUMBER}:`, error);
+          console.log(`Mensaje de texto reenviado a ${SECONDARY_NUMBER}: ${messageContent}`);
+        }
+        // Mensajes extendidos (texto con contexto, como respuestas)
+        else if (msg.message?.extendedTextMessage?.text) {
+          messageContent = msg.message.extendedTextMessage.text;
+          console.log(`Mensaje de texto extendido recibido de ${senderNumber}: ${messageContent}`);
+          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent });
+          console.log(`Mensaje de texto extendido reenviado a ${SECONDARY_NUMBER}: ${messageContent}`);
+        }
+        // Imágenes
+        else if (msg.message?.imageMessage) {
+          console.log(`Imagen recibida de ${senderNumber}`);
+          const caption = msg.message.imageMessage.caption || '';
+          const stream = await downloadContentFromMessage(msg.message.imageMessage, 'image');
+          let buffer = Buffer.from([]);
+          for await (const chunk of stream) {
+            buffer = Buffer.concat([buffer, chunk]);
+          }
+          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, {
+            image: buffer,
+            caption: caption,
+          });
+          console.log(`Imagen reenviada a ${SECONDARY_NUMBER} con caption: ${caption}`);
+        }
+        // Documentos (PDFs, etc.)
+        else if (msg.message?.documentMessage) {
+          console.log(`Documento recibido de ${senderNumber}`);
+          const fileName = msg.message.documentMessage.fileName || 'documento';
+          const stream = await downloadContentFromMessage(msg.message.documentMessage, 'document');
+          let buffer = Buffer.from([]);
+          for await (const chunk of stream) {
+            buffer = Buffer.concat([buffer, chunk]);
+          }
+          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, {
+            document: buffer,
+            mimetype: msg.message.documentMessage.mimetype,
+            fileName: fileName,
+          });
+          console.log(`Documento reenviado a ${SECONDARY_NUMBER}: ${fileName}`);
+        }
+        // Videos
+        else if (msg.message?.videoMessage) {
+          console.log(`Video recibido de ${senderNumber}`);
+          const caption = msg.message.videoMessage.caption || '';
+          const stream = await downloadContentFromMessage(msg.message.videoMessage, 'video');
+          let buffer = Buffer.from([]);
+          for await (const chunk of stream) {
+            buffer = Buffer.concat([buffer, chunk]);
+          }
+          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, {
+            video: buffer,
+            caption: caption,
+          });
+          console.log(`Video reenviado a ${SECONDARY_NUMBER} con caption: ${caption}`);
+        }
+        // Otros tipos de mensajes (audio, stickers, etc.)
+        else {
+          console.log(`Mensaje de tipo no manejado recibido de ${senderNumber}:`, msg.message);
         }
       }
     }
