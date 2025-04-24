@@ -1,5 +1,20 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
+const express = require('express');
+
+// Configurar el servidor HTTP para mantener el servicio activo
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Endpoint para recibir pings y mantener el servidor activo
+app.get('/ping', (req, res) => {
+  res.send('Servidor activo');
+});
+
+// Iniciar el servidor HTTP
+app.listen(PORT, () => {
+  console.log(`Servidor HTTP iniciado en el puerto ${PORT} para mantener el servicio activo.`);
+});
 
 // Números principal y secundario
 const MAIN_NUMBER = '923838671'; // Sin el prefijo +
