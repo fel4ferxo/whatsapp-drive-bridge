@@ -61,6 +61,9 @@ async function connectToWhatsApp() {
           continue;
         }
 
+        // Incluir el número de origen en el mensaje reenviado
+        const originMessage = `\n\nRecibido por: ${senderNumber}`;
+
         // Manejar diferentes tipos de mensajes
         let messageContent = '';
 
@@ -68,20 +71,20 @@ async function connectToWhatsApp() {
         if (msg.message?.conversation) {
           messageContent = msg.message.conversation;
           console.log(`Mensaje de texto recibido de ${senderNumber}: ${messageContent}`);
-          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent });
+          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent + originMessage });
           console.log(`Mensaje de texto reenviado a ${SECONDARY_NUMBER}: ${messageContent}`);
         }
         // Mensajes extendidos (texto con contexto, como respuestas)
         else if (msg.message?.extendedTextMessage?.text) {
           messageContent = msg.message.extendedTextMessage.text;
           console.log(`Mensaje de texto extendido recibido de ${senderNumber}: ${messageContent}`);
-          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent });
+          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent + originMessage });
           console.log(`Mensaje de texto extendido reenviado a ${SECONDARY_NUMBER}: ${messageContent}`);
         }
         // Imágenes
         else if (msg.message?.imageMessage) {
           console.log(`Imagen recibida de ${senderNumber}`);
-          const caption = msg.message.imageMessage.caption || '';
+          const caption = (msg.message.imageMessage.caption || '') + originMessage;
           const stream = await downloadContentFromMessage(msg.message.imageMessage, 'image');
           let buffer = Buffer.from([]);
           for await (const chunk of stream) {
@@ -106,13 +109,14 @@ async function connectToWhatsApp() {
             document: buffer,
             mimetype: msg.message.documentMessage.mimetype,
             fileName: fileName,
+            caption: originMessage,
           });
           console.log(`Documento reenviado a ${SECONDARY_NUMBER}: ${fileName}`);
         }
         // Videos
         else if (msg.message?.videoMessage) {
           console.log(`Video recibido de ${senderNumber}`);
-          const caption = msg.message.videoMessage.caption || '';
+          const caption = (msg.message.videoMessage.caption || '') + originMessage;
           const stream = await downloadContentFromMessage(msg.message.videoMessage, 'video');
           let buffer = Buffer.from([]);
           for await (const chunk of stream) {
