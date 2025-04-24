@@ -1,9 +1,8 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 
-// Configuración del cliente de WhatsApp
+// Configuración del cliente de WhatsApp sin LocalAuth
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: '/app/.wwebjs_auth' }), // Persistencia en Render
   puppeteer: {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -11,24 +10,22 @@ const client = new Client({
   },
 });
 
-// Número secundario al que se reenviarán los mensajes
-const SECONDARY_NUMBER = '906040838@c.us'; // Formato: número@c.us
+// Números principal y secundario
+const MAIN_NUMBER = '923838671@c.us'; // Número principal fijo
+const SECONDARY_NUMBER = '906040838@c.us'; // Número secundario
 
 // Mostrar QR para autenticación
 client.on('qr', (qr) => {
-  console.log('Escanea este QR con WhatsApp:');
+  console.log('Escanea este QR con WhatsApp (número principal: 923838671):');
   qrcode.generate(qr, { small: true }, (code) => {
-    console.log('QR generado en los logs. Escanea con tu número principal.');
+    console.log('QR generado en los logs. Escanea con el número principal.');
     console.log(code); // Mostrar el QR explícitamente en los logs
   });
 });
 
-// Confirmar conexión y obtener el número principal
-let MAIN_NUMBER = '';
+// Confirmar conexión
 client.on('ready', async () => {
-  const user = await client.getContactById(client.info.wid._serialized);
-  MAIN_NUMBER = user.id._serialized; // Número principal dinámico
-  console.log(`WhatsApp conectado. Número principal: ${MAIN_NUMBER}`);
+  console.log('WhatsApp conectado. Número principal: 923838671');
   // Enviar mensaje de prueba al secundario para confirmar conexión
   try {
     await client.sendMessage(SECONDARY_NUMBER, 'Bot conectado exitosamente.');
