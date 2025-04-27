@@ -14,7 +14,6 @@ app.get('/ping', (req, res) => {
   res.send('Servidor activo');
 });
 
-// Añadir ruta predeterminada para manejar solicitudes no definidas
 app.use((req, res) => {
   res.status(404).send('Ruta no encontrada. Usa /ping para verificar el estado del servidor.');
 });
@@ -23,7 +22,6 @@ app.listen(PORT, () => {
   console.log(`Servidor HTTP iniciado en el puerto ${PORT} para mantener el servicio activo.`);
 });
 
-// [El resto de tu código (constantes, funciones, connectToWhatsApp) permanece igual]
 const MAIN_NUMBER = '923838671';
 const SECONDARY_NUMBER = '51906040838';
 const MESSAGE_LIMIT_PER_MINUTE = 10;
@@ -59,9 +57,9 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    qrTimeout: 60000,
-    connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 30000,
+    qrTimeout: 5000, // Reducir a 5 segundos para evitar timeout de Vercel
+    connectTimeoutMs: 5000, // Reducir a 5 segundos
+    keepAliveIntervalMs: 10000, // Enviar keep-alive cada 10 segundos
     syncFullHistory: false,
   });
 
@@ -80,7 +78,7 @@ async function connectToWhatsApp() {
       }
       console.log(`Intento de QR ${qrAttempts}/${maxQRAattempts}. Escanea este QR con WhatsApp (número principal: 923838671):`);
       qrcode.generate(qr, { small: true }, (code) => {
-        console.log('QR generado en los logs. Escanea con el número principal dentro de 60 segundos.');
+        console.log('QR generado en los logs. Escanea con el número principal dentro de 5 segundos.');
         console.log(code);
       });
     }
