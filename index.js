@@ -6,6 +6,12 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware para manejar errores y evitar respuestas largas
+app.use((err, req, res, next) => {
+  console.error('Error en el servidor:', err);
+  res.status(500).send('Error interno del servidor');
+});
+
 // Endpoint para recibir pings y mantener el servidor activo
 app.get('/ping', (req, res) => {
   res.send('Servidor activo');
@@ -62,8 +68,8 @@ async function connectToWhatsApp() {
     auth: state,
     printQRInTerminal: false, // Vamos a manejar el QR manualmente
     qrTimeout: 60000, // Tiempo de espera para escanear el QR: 60 segundos
-    connectTimeoutMs: 60000, // Aumentar el tiempo de espera para la conexión a 60 segundos
-    keepAliveIntervalMs: 30000, // Enviar keep-alive cada 30 segundos para mantener la conexión
+    connectTimeoutMs: 60000, // Tiempo de espera para la conexión: 60 segundos
+    keepAliveIntervalMs: 30000, // Enviar keep-alive cada 30 segundos
     syncFullHistory: false, // Desactivar la sincronización completa del historial
   });
 
@@ -130,7 +136,7 @@ async function connectToWhatsApp() {
     }
   });
 
-  // Manejar errores de stream (como el código 515)
+  // Manejar errores de stream
   sock.ev.on('connection.update', (update) => {
     if (update.lastDisconnect?.error?.message?.includes('Stream Errored')) {
       console.log('Error de stream detectado. Forzando reconexión...');
