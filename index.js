@@ -57,26 +57,39 @@ async function connectToWhatsApp() {
   // Configurar la autenticación (almacenar en /tmp para evitar problemas de permisos en Render)
   const { state, saveCreds } = await useMultiFileAuthState('/tmp/whatsapp-auth');
 
-  // Crear el cliente de WhatsApp
+  // Crear el cliente de WhatsApp con configuración personalizada para QR
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false, // Vamos a manejar el QR manualmente
+    qrTimeout: 60000, // Tiempo de espera para escanear el QR: 60 segundos
+    connectTimeoutMs: 30000, // Tiempo de espera para la conexión
+    syncFullHistory: false, // Desactivar la sincronización completa del historial para evitar problemas
   });
 
   // Mostrar el QR para autenticación
+  let qrAttempts = 0;
+  const maxQRAattempts = 5; // Número máximo de intentos para generar QRs
+
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('Escanea este QR con WhatsApp (número principal: 923838671):');
+      qrAttempts++;
+      if (qrAttempts > maxQRAattempts) {
+        console.log(`Se alcanzó el número máximo de intentos (${maxQRAattempts}) para generar QRs. Reiniciando conexión...`);
+        sock.end(); // Forzar el cierre de la conexión para reiniciar
+        return;
+      }
+      console.log(`Intento de QR ${qrAttempts}/${maxQRAattempts}. Escanea este QR con WhatsApp (número principal: 923838671):`);
       qrcode.generate(qr, { small: true }, (code) => {
-        console.log('QR generado en los logs. Escanea con el número principal.');
+        console.log('QR generado en los logs. Escanea con el número principal dentro de 60 segundos.');
         console.log(code);
       });
     }
 
     if (connection === 'open') {
       console.log('WhatsApp conectado. Número principal: 923838671');
+      qrAttempts = 0; // Reiniciar el contador de intentos
       // Enviar mensaje de prueba al secundario
       try {
         await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: 'Bot conectado exitosamente.' });
@@ -102,6 +115,19 @@ async function connectToWhatsApp() {
 
   // Guardar las credenciales cuando se actualicen
   sock.ev.on('creds.update', saveCreds);
+
+  // Manejar errores de sincronización del estado
+  sock.ev.on('chats.set', async () => {
+    try {
+      console.log('Sincronizando estado de chats...');
+    } catch (error) {
+      console.error('Error al sincronizar estado de chats:', error);
+      if (error.message.includes('failed to sync state')) {
+        console.log('Forzando reconexión debido a error de sincronización...');
+        sock.end(); // Forzar cierre de la conexión
+      }
+    }
+  });
 
   // Reenviar mensajes recibidos por el número principal al secundario
   sock.ev.on('messages.upsert', async (m) => {
