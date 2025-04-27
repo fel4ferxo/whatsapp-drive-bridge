@@ -57,13 +57,14 @@ async function connectToWhatsApp() {
   // Configurar la autenticación (almacenar en /tmp para evitar problemas de permisos en Render)
   const { state, saveCreds } = await useMultiFileAuthState('/tmp/whatsapp-auth');
 
-  // Crear el cliente de WhatsApp con configuración personalizada para QR
+  // Crear el cliente de WhatsApp con configuración personalizada
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false, // Vamos a manejar el QR manualmente
     qrTimeout: 60000, // Tiempo de espera para escanear el QR: 60 segundos
-    connectTimeoutMs: 30000, // Tiempo de espera para la conexión
-    syncFullHistory: false, // Desactivar la sincronización completa del historial para evitar problemas
+    connectTimeoutMs: 60000, // Aumentar el tiempo de espera para la conexión a 60 segundos
+    keepAliveIntervalMs: 30000, // Enviar keep-alive cada 30 segundos para mantener la conexión
+    syncFullHistory: false, // Desactivar la sincronización completa del historial
   });
 
   // Mostrar el QR para autenticación
@@ -126,6 +127,14 @@ async function connectToWhatsApp() {
         console.log('Forzando reconexión debido a error de sincronización...');
         sock.end(); // Forzar cierre de la conexión
       }
+    }
+  });
+
+  // Manejar errores de stream (como el código 515)
+  sock.ev.on('connection.update', (update) => {
+    if (update.lastDisconnect?.error?.message?.includes('Stream Errored')) {
+      console.log('Error de stream detectado. Forzando reconexión...');
+      sock.end(); // Forzar cierre de la conexión
     }
   });
 
