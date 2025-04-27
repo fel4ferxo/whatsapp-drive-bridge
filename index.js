@@ -2,80 +2,71 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, download
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 
-// Configurar el servidor HTTP para mantener el servicio activo
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware para manejar errores y evitar respuestas largas
 app.use((err, req, res, next) => {
   console.error('Error en el servidor:', err);
   res.status(500).send('Error interno del servidor');
 });
 
-// Endpoint para recibir pings y mantener el servidor activo
 app.get('/ping', (req, res) => {
   res.send('Servidor activo');
 });
 
-// Iniciar el servidor HTTP
+// Añadir ruta predeterminada para manejar solicitudes no definidas
+app.use((req, res) => {
+  res.status(404).send('Ruta no encontrada. Usa /ping para verificar el estado del servidor.');
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor HTTP iniciado en el puerto ${PORT} para mantener el servicio activo.`);
 });
 
-// Números principal y secundario
-const MAIN_NUMBER = '923838671'; // Sin el prefijo +
-const SECONDARY_NUMBER = '51906040838'; // Número secundario fijo, con prefijo +51
+// [El resto de tu código (constantes, funciones, connectToWhatsApp) permanece igual]
+const MAIN_NUMBER = '923838671';
+const SECONDARY_NUMBER = '51906040838';
+const MESSAGE_LIMIT_PER_MINUTE = 10;
+const MESSAGE_LIMIT_PER_HOUR = 100;
+const MIN_DELAY_MS = 1000;
+const MAX_DELAY_MS = 5000;
 
-// Configuración para evitar bloqueos
-const MESSAGE_LIMIT_PER_MINUTE = 10; // Máximo 10 mensajes por minuto
-const MESSAGE_LIMIT_PER_HOUR = 100; // Máximo 100 mensajes por hora
-const MIN_DELAY_MS = 1000; // Retraso mínimo de 1 segundo entre mensajes
-const MAX_DELAY_MS = 5000; // Retraso máximo de 5 segundos entre mensajes
-
-// Variables para rastrear mensajes y evitar bloqueos
 let messageCountPerMinute = 0;
 let messageCountPerHour = 0;
 let lastMessageContent = '';
 let lastMessageTimestamp = Date.now();
 let isPaused = false;
 
-// Resetear contadores cada minuto y hora
 setInterval(() => {
   messageCountPerMinute = 0;
-}, 60 * 1000); // Cada minuto
+}, 60 * 1000);
 setInterval(() => {
   messageCountPerHour = 0;
-  isPaused = false; // Reanudar si estaba pausado
+  isPaused = false;
   console.log('Contador de mensajes por hora reiniciado.');
-}, 60 * 60 * 1000); // Cada hora
+}, 60 * 60 * 1000);
 
-// Función para generar un retraso aleatorio
 function getRandomDelay() {
   return Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
 }
 
-// Función para pausar la ejecución (usada para retrasos)
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function connectToWhatsApp() {
-  // Configurar la autenticación (almacenar en /tmp para evitar problemas de permisos en Render)
   const { state, saveCreds } = await useMultiFileAuthState('/tmp/whatsapp-auth');
-
-  // Crear el cliente de WhatsApp con configuración personalizada
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: false, // Vamos a manejar el QR manualmente
-    qrTimeout: 60000, // Tiempo de espera para escanear el QR: 60 segundos
-    connectTimeoutMs: 60000, // Tiempo de espera para la conexión: 60 segundos
-    keepAliveIntervalMs: 30000, // Enviar keep-alive cada 30 segundos
-    syncFullHistory: false, // Desactivar la sincronización completa del historial
+    printQRInTerminal: false,
+    qrTimeout: 60000,
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 30000,
+    syncFullHistory: false,
   });
 
-  // Mostrar el QR para autenticación
   let qrAttempts = 0;
-  const maxQRAattempts = 5; // Número máximo de intentos para generar QRs
+  const maxQRAattempts = 5;
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -84,7 +75,7 @@ async function connectToWhatsApp() {
       qrAttempts++;
       if (qrAttempts > maxQRAattempts) {
         console.log(`Se alcanzó el número máximo de intentos (${maxQRAattempts}) para generar QRs. Reiniciando conexión...`);
-        sock.end(); // Forzar el cierre de la conexión para reiniciar
+        sock.end();
         return;
       }
       console.log(`Intento de QR ${qrAttempts}/${maxQRAattempts}. Escanea este QR con WhatsApp (número principal: 923838671):`);
@@ -96,8 +87,7 @@ async function connectToWhatsApp() {
 
     if (connection === 'open') {
       console.log('WhatsApp conectado. Número principal: 923838671');
-      qrAttempts = 0; // Reiniciar el contador de intentos
-      // Enviar mensaje de prueba al secundario
+      qrAttempts = 0;
       try {
         await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: 'Bot conectado exitosamente.' });
         console.log(`Mensaje de prueba enviado a ${SECONDARY_NUMBER}`);
@@ -111,7 +101,6 @@ async function connectToWhatsApp() {
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       console.log('Conexión cerrada:', lastDisconnect?.error, 'Reconectando:', shouldReconnect);
       if (shouldReconnect) {
-        // Retraso exponencial para reconexión (mínimo 5 segundos, máximo 30 segundos)
         const reconnectDelay = Math.min(30000, 5000 * (lastDisconnect?.error?.output?.retryCount || 1));
         console.log(`Esperando ${reconnectDelay / 1000} segundos antes de reconectar...`);
         await delay(reconnectDelay);
@@ -120,10 +109,8 @@ async function connectToWhatsApp() {
     }
   });
 
-  // Guardar las credenciales cuando se actualicen
   sock.ev.on('creds.update', saveCreds);
 
-  // Manejar errores de sincronización del estado
   sock.ev.on('chats.set', async () => {
     try {
       console.log('Sincronizando estado de chats...');
@@ -131,20 +118,18 @@ async function connectToWhatsApp() {
       console.error('Error al sincronizar estado de chats:', error);
       if (error.message.includes('failed to sync state')) {
         console.log('Forzando reconexión debido a error de sincronización...');
-        sock.end(); // Forzar cierre de la conexión
+        sock.end();
       }
     }
   });
 
-  // Manejar errores de stream
   sock.ev.on('connection.update', (update) => {
     if (update.lastDisconnect?.error?.message?.includes('Stream Errored')) {
       console.log('Error de stream detectado. Forzando reconexión...');
-      sock.end(); // Forzar cierre de la conexión
+      sock.end();
     }
   });
 
-  // Reenviar mensajes recibidos por el número principal al secundario
   sock.ev.on('messages.upsert', async (m) => {
     const messages = m.messages;
     for (const msg of messages) {
@@ -155,7 +140,6 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        // Verificar límites de mensajes
         if (isPaused) {
           console.log('Reenvío pausado: se excedió el límite de mensajes por hora.');
           continue;
@@ -173,10 +157,7 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        // Incluir el número de origen en el mensaje reenviado
         const originMessage = `\n\nRecibido por: ${senderNumber}`;
-
-        // Manejar mensajes duplicados
         let messageContent = '';
         if (msg.message?.conversation) {
           messageContent = msg.message.conversation;
@@ -190,12 +171,10 @@ async function connectToWhatsApp() {
         lastMessageContent = messageContent || '';
         lastMessageTimestamp = Date.now();
 
-        // Agregar retraso aleatorio para simular comportamiento humano
         const delayMs = getRandomDelay();
         console.log(`Aplicando retraso de ${delayMs}ms antes de reenviar el mensaje...`);
         await delay(delayMs);
 
-        // Manejar diferentes tipos de mensajes
         if (msg.message?.conversation) {
           console.log(`Mensaje de texto recibido de ${senderNumber}: ${messageContent}`);
           await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent + originMessage });
@@ -258,5 +237,4 @@ async function connectToWhatsApp() {
   });
 }
 
-// Iniciar la conexión
 connectToWhatsApp();
