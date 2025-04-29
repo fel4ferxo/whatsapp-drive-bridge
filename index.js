@@ -35,7 +35,10 @@ let messageCountPerHour = 0;
 let lastMessageContent = '';
 let lastMessageTimestamp = Date.now();
 let isPaused = false;
-let isFirstConnection = true; // Bandera para rastrear la primera conexión
+let isFirstConnection = true;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+let isConnecting = false; // Bandera para evitar múltiples intentos de reconexión simultáneos
 
 setInterval(() => {
   messageCountPerMinute = 0;
@@ -55,6 +58,12 @@ function delay(ms) {
 }
 
 async function connectToWhatsApp() {
+  if (isConnecting) {
+    console.log('Ya se está intentando una conexión. Ignorando nuevo intento...');
+    return;
+  }
+  isConnecting = true;
+
   // Conectar a PostgreSQL (Neon)
   const pgClient = new Client({
     connectionString: process.env.DATABASE_URL,
@@ -97,10 +106,29 @@ async function connectToWhatsApp() {
     auth: authState,
     printQRInTerminal: false,
     qrTimeout: 30000,
-    connectTimeoutMs: 60000, // Aumentado a 60 segundos
-    keepAliveIntervalMs: 30000, // Aumentado a 30 segundos para mantener la conexión viva
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 30000, // Reducido a 30 segundos para mantener la conexión viva más activamente
     syncFullHistory: false,
-    generateHighQualityLinkPreview: false, // Deshabilitar para reducir carga
+    generateHighQualityLinkPreview: false,
+    defaultQueryTimeoutMs: 60000,
+    markOnlineOnConnect: false, // Deshabilitar para reducir actividad sospechosa
+    patchMessageBeforeSending: (message) => {
+      const requiresPatch = !!(message.buttonsMessage || message.templateMessage || message.listMessage);
+      if (requiresPatch) {
+        message = {
+          viewOnceMessage: {
+            message: {
+              messageContextInfo: {
+                deviceListMetadataVersion: 2,
+                deviceListMetadata: {},
+              },
+              ...message,
+            },
+          },
+        };
+      }
+      return message;
+    },
   });
 
   // Guardar credenciales en Neon
@@ -122,13 +150,14 @@ async function connectToWhatsApp() {
   const maxQRAattempts = 5;
 
   sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    const { connection, lastDisconnect, qr, isNewLogin } = update;
 
     if (qr) {
       qrAttempts++;
       if (qrAttempts > maxQRAattempts) {
         console.log(`Se alcanzó el número máximo de intentos (${maxQRAattempts}) para generar QRs. Reiniciando conexión...`);
         sock.end();
+        isConnecting = false;
         return;
       }
       console.log(`Intento de QR ${qrAttempts}/${maxQRAattempts}. Escanea este QR con WhatsApp (número principal: ${MAIN_NUMBER}):`);
@@ -139,20 +168,21 @@ async function connectToWhatsApp() {
     }
 
     if (connection === 'open') {
-      console.log(`WhatsApp conectado. Número principal: ${MAIN_NUMBER}`);
+      console.log(`WhatsApp conectado. Número principal: ${MAIN_NUMBER}, Nueva sesión: ${isNewLogin}`);
       qrAttempts = 0;
-      // Enviar el mensaje solo en la primera conexión
+      reconnectAttempts = 0;
       if (isFirstConnection) {
         try {
           await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: 'Bot conectado exitosamente.' });
           console.log(`Mensaje de prueba enviado a ${SECONDARY_NUMBER}`);
-          isFirstConnection = false; // Desactivar después del primer envío
+          isFirstConnection = false;
         } catch (error) {
           console.error(`Error al enviar mensaje de prueba a ${SECONDARY_NUMBER}:`, error);
         }
       } else {
         console.log('Reconexión detectada. No se enviará mensaje de prueba.');
       }
+      isConnecting = false;
     }
 
     if (connection === 'close') {
@@ -160,14 +190,25 @@ async function connectToWhatsApp() {
       const reason = lastDisconnect?.error?.message || 'Desconocido';
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       console.log(`Conexión cerrada. Razón: ${reason}, Código: ${statusCode}, Reconectando: ${shouldReconnect}`);
+
       if (shouldReconnect) {
-        const reconnectDelay = Math.min(30000, 5000 * (lastDisconnect?.error?.output?.retryCount || 1));
-        console.log(`Esperando ${reconnectDelay / 1000} segundos antes de reconectar...`);
+        reconnectAttempts++;
+        if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+          console.log(`Se alcanzó el número máximo de intentos de reconexión (${MAX_RECONNECT_ATTEMPTS}). Deteniendo reconexiones automáticas...`);
+          console.log('Por favor, verifica manualmente si hay conflictos de sesión en WhatsApp (Ajustes > Dispositivos Vinculados).');
+          isConnecting = false;
+          return;
+        }
+        const baseDelay = 15000; // Retraso base de 15 segundos
+        const exponentialBackoff = Math.pow(2, reconnectAttempts) * baseDelay; // Retraso exponencial
+        const reconnectDelay = Math.min(120000, exponentialBackoff); // Máximo 2 minutos
+        console.log(`Intento de reconexión ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}. Esperando ${reconnectDelay / 1000} segundos antes de reconectar...`);
         await delay(reconnectDelay);
         connectToWhatsApp();
       } else {
         console.log('Sesión cerrada por logout. Limpiando credenciales en Neon...');
         await pgClient.query('DELETE FROM sessions WHERE id = $1', [sessionId]);
+        isConnecting = false;
       }
     }
   });
