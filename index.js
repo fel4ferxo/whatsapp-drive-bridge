@@ -35,6 +35,7 @@ let messageCountPerHour = 0;
 let lastMessageContent = '';
 let lastMessageTimestamp = Date.now();
 let isPaused = false;
+let isFirstConnection = true; // Bandera para rastrear la primera conexión
 
 setInterval(() => {
   messageCountPerMinute = 0;
@@ -70,12 +71,11 @@ async function connectToWhatsApp() {
     const result = await pgClient.query('SELECT creds FROM sessions WHERE id = $1', [sessionId]);
     if (result.rows.length > 0) {
       console.log('Cargando credenciales desde Neon...');
-      // Parsear las credenciales y convertir los Buffers correctamente
       const savedCreds = JSON.parse(result.rows[0].creds, BufferJSON.reviver);
       const { state, saveCreds: save } = await useMultiFileAuthState('/tmp/whatsapp-auth');
       authState = {
         creds: savedCreds,
-        keys: state.keys // Dejar que useMultiFileAuthState maneje las claves
+        keys: state.keys
       };
       saveCreds = save;
       console.log('Credenciales cargadas exitosamente desde Neon:', JSON.stringify(savedCreds, null, 2));
@@ -97,15 +97,15 @@ async function connectToWhatsApp() {
     auth: authState,
     printQRInTerminal: false,
     qrTimeout: 30000,
-    connectTimeoutMs: 30000,
-    keepAliveIntervalMs: 5000,
+    connectTimeoutMs: 60000, // Aumentado a 60 segundos
+    keepAliveIntervalMs: 30000, // Aumentado a 30 segundos para mantener la conexión viva
     syncFullHistory: false,
+    generateHighQualityLinkPreview: false, // Deshabilitar para reducir carga
   });
 
   // Guardar credenciales en Neon
   sock.ev.on('creds.update', async () => {
     if (saveCreds) await saveCreds();
-    // Serializar las credenciales usando BufferJSON para manejar Buffers correctamente
     const creds = JSON.stringify(sock.authState.creds, BufferJSON.replacer);
     try {
       await pgClient.query(
@@ -141,18 +141,25 @@ async function connectToWhatsApp() {
     if (connection === 'open') {
       console.log(`WhatsApp conectado. Número principal: ${MAIN_NUMBER}`);
       qrAttempts = 0;
-      try {
-        await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: 'Bot conectado exitosamente.' });
-        console.log(`Mensaje de prueba enviado a ${SECONDARY_NUMBER}`);
-      } catch (error) {
-        console.error(`Error al enviar mensaje de prueba a ${SECONDARY_NUMBER}:`, error);
+      // Enviar el mensaje solo en la primera conexión
+      if (isFirstConnection) {
+        try {
+          await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: 'Bot conectado exitosamente.' });
+          console.log(`Mensaje de prueba enviado a ${SECONDARY_NUMBER}`);
+          isFirstConnection = false; // Desactivar después del primer envío
+        } catch (error) {
+          console.error(`Error al enviar mensaje de prueba a ${SECONDARY_NUMBER}:`, error);
+        }
+      } else {
+        console.log('Reconexión detectada. No se enviará mensaje de prueba.');
       }
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const reason = lastDisconnect?.error?.message || 'Desconocido';
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log('Conexión cerrada:', lastDisconnect?.error, 'Reconectando:', shouldReconnect);
+      console.log(`Conexión cerrada. Razón: ${reason}, Código: ${statusCode}, Reconectando: ${shouldReconnect}`);
       if (shouldReconnect) {
         const reconnectDelay = Math.min(30000, 5000 * (lastDisconnect?.error?.output?.retryCount || 1));
         console.log(`Esperando ${reconnectDelay / 1000} segundos antes de reconectar...`);
