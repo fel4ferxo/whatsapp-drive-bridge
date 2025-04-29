@@ -86,12 +86,12 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     auth: authState,
     printQRInTerminal: false,
-    qrTimeout: 5000,
-    connectTimeoutMs: 5000,
-    keepAliveIntervalMs: 10000,
+    qrTimeout: 30000, // Aumentado a 30 segundos
+    connectTimeoutMs: 30000, // Aumentado a 30 segundos
+    keepAliveIntervalMs: 5000, // Reducido a 5 segundos para mantener la conexión viva
     syncFullHistory: false,
   });
-
+  
   // Guardar credenciales en Neon
   sock.ev.on('creds.update', async () => {
     if (saveCreds) await saveCreds();
