@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadContentFromMessage } = require('baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadContentFromMessage, BufferJSON } = require('baileys');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const { Client } = require('pg');
@@ -67,16 +67,18 @@ async function connectToWhatsApp() {
   let saveCreds;
 
   try {
-    const result = await pgClient.query('SELECT creds, keys FROM sessions WHERE id = $1', [sessionId]);
+    const result = await pgClient.query('SELECT creds FROM sessions WHERE id = $1', [sessionId]);
     if (result.rows.length > 0) {
-      console.log('Cargando credenciales y claves desde Neon...');
-      const savedCreds = JSON.parse(result.rows[0].creds);
-      const savedKeys = JSON.parse(result.rows[0].keys);
+      console.log('Cargando credenciales desde Neon...');
+      // Parsear las credenciales y convertir los Buffers correctamente
+      const savedCreds = JSON.parse(result.rows[0].creds, BufferJSON.reviver);
+      const { state, saveCreds: save } = await useMultiFileAuthState('/tmp/whatsapp-auth');
       authState = {
         creds: savedCreds,
-        keys: savedKeys
+        keys: state.keys // Dejar que useMultiFileAuthState maneje las claves
       };
-      console.log('Credenciales y claves cargadas exitosamente desde Neon:', JSON.stringify(savedCreds, null, 2));
+      saveCreds = save;
+      console.log('Credenciales cargadas exitosamente desde Neon:', JSON.stringify(savedCreds, null, 2));
     } else {
       console.log('No se encontraron credenciales en Neon. Inicializando nuevo estado...');
       const { state, saveCreds: save } = await useMultiFileAuthState('/tmp/whatsapp-auth');
@@ -100,19 +102,19 @@ async function connectToWhatsApp() {
     syncFullHistory: false,
   });
 
-  // Guardar credenciales y claves en Neon
+  // Guardar credenciales en Neon
   sock.ev.on('creds.update', async () => {
     if (saveCreds) await saveCreds();
-    const creds = JSON.stringify(sock.authState.creds);
-    const keys = JSON.stringify(sock.authState.keys);
+    // Serializar las credenciales usando BufferJSON para manejar Buffers correctamente
+    const creds = JSON.stringify(sock.authState.creds, BufferJSON.replacer);
     try {
       await pgClient.query(
-        'INSERT INTO sessions (id, creds, keys) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET creds = $2, keys = $3',
-        [sessionId, creds, keys]
+        'INSERT INTO sessions (id, creds) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET creds = $2',
+        [sessionId, creds]
       );
-      console.log('Credenciales y claves guardadas en PostgreSQL');
+      console.log('Credenciales guardadas en PostgreSQL');
     } catch (err) {
-      console.error('Error al guardar credenciales y claves:', err);
+      console.error('Error al guardar credenciales:', err);
     }
   });
 
@@ -227,17 +229,15 @@ async function connectToWhatsApp() {
         console.log(`Aplicando retraso de ${delayMs}ms antes de reenviar el mensaje...`);
         await delay(delayMs);
 
-        if (msg.message?.conversation) ký
+        if (msg.message?.conversation) {
           console.log(`Mensaje de texto recibido de ${senderNumber}: ${messageContent}`);
           await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent + originMessage });
           console.log(`Mensaje de texto reenviado a ${SECONDARY_NUMBER}: ${messageContent}`);
-        }
-        else if (msg.message?.extendedTextMessage?.text) {
+        } else if (msg.message?.extendedTextMessage?.text) {
           console.log(`Mensaje de texto extendido recibido de ${senderNumber}: ${messageContent}`);
           await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: messageContent + originMessage });
           console.log(`Mensaje de texto extendido reenviado a ${SECONDARY_NUMBER}: ${messageContent}`);
-        }
-        else if (msg.message?.imageMessage) {
+        } else if (msg.message?.imageMessage) {
           console.log(`Imagen recibida de ${senderNumber}`);
           const caption = (msg.message.imageMessage.caption || '') + originMessage;
           const stream = await downloadContentFromMessage(msg.message.imageMessage, 'image');
@@ -250,8 +250,7 @@ async function connectToWhatsApp() {
             caption: caption,
           });
           console.log(`Imagen reenviada a ${SECONDARY_NUMBER} con caption: ${caption}`);
-        }
-        else if (msg.message?.documentMessage) {
+        } else if (msg.message?.documentMessage) {
           console.log(`Documento recibido de ${senderNumber}`);
           const fileName = msg.message.documentMessage.fileName || 'documento';
           const stream = await downloadContentFromMessage(msg.message.documentMessage, 'document');
@@ -266,8 +265,7 @@ async function connectToWhatsApp() {
             caption: originMessage,
           });
           console.log(`Documento reenviado a ${SECONDARY_NUMBER}: ${fileName}`);
-        }
-        else if (msg.message?.videoMessage) {
+        } else if (msg.message?.videoMessage) {
           console.log(`Video recibido de ${senderNumber}`);
           const caption = (msg.message.videoMessage.caption || '') + originMessage;
           const stream = await downloadContentFromMessage(msg.message.videoMessage, 'video');
@@ -280,13 +278,12 @@ async function connectToWhatsApp() {
             caption: caption,
           });
           console.log(`Video reenviado a ${SECONDARY_NUMBER} con caption: ${caption}`);
-        }
-        else {
+        } else {
           console.log(`Mensaje de tipo no manejado recibido de ${senderNumber}:`, msg.message);
         }
       }
     }
-  );
+  });
 }
 
 connectToWhatsApp();
