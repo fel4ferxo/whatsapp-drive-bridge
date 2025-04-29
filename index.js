@@ -63,6 +63,7 @@ async function connectToWhatsApp() {
 
   // Cargar o inicializar sesiones desde Neon
   let authState;
+  let saveCreds;
   const sessionId = 'whatsapp_session';
   try {
     const result = await pgClient.query('SELECT data FROM sessions WHERE id = $1', [sessionId]);
@@ -71,13 +72,15 @@ async function connectToWhatsApp() {
       authState = { creds: JSON.parse(result.rows[0].data), keys: {} };
     } else {
       console.log('No se encontraron credenciales en Neon. Inicializando nuevo estado...');
-      const { state } = await useMultiFileAuthState('/tmp/whatsapp-auth');
+      const { state, saveCreds: save } = await useMultiFileAuthState('/tmp/whatsapp-auth');
       authState = state;
+      saveCreds = save;
     }
   } catch (err) {
     console.error('Error al cargar credenciales desde Neon:', err);
-    const { state } = await useMultiFileAuthState('/tmp/whatsapp-auth');
+    const { state, saveCreds: save } = await useMultiFileAuthState('/tmp/whatsapp-auth');
     authState = state;
+    saveCreds = save;
   }
 
   const sock = makeWASocket({
@@ -91,7 +94,8 @@ async function connectToWhatsApp() {
 
   // Guardar credenciales en Neon
   sock.ev.on('creds.update', async () => {
-    const creds = JSON.stringify(authState.creds);
+    if (saveCreds) await saveCreds();
+    const creds = JSON.stringify(sock.authState.creds);
     try {
       await pgClient.query(
         'INSERT INTO sessions (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = $2',
