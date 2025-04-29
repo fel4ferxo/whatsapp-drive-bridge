@@ -1,6 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
+const { Client } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,14 +54,53 @@ function delay(ms) {
 }
 
 async function connectToWhatsApp() {
-  const { state, saveCreds } = await useMultiFileAuthState('/tmp/whatsapp-auth');
+  // Conectar a PostgreSQL (Neon)
+  const pgClient = new Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+  await pgClient.connect();
+
+  // Cargar o inicializar sesiones desde Neon
+  let authState;
+  const sessionId = 'whatsapp_session';
+  try {
+    const result = await pgClient.query('SELECT data FROM sessions WHERE id = $1', [sessionId]);
+    if (result.rows.length > 0) {
+      console.log('Cargando credenciales desde Neon...');
+      authState = { creds: JSON.parse(result.rows[0].data), keys: {} };
+    } else {
+      console.log('No se encontraron credenciales en Neon. Inicializando nuevo estado...');
+      const { state } = await useMultiFileAuthState('/tmp/whatsapp-auth');
+      authState = state;
+    }
+  } catch (err) {
+    console.error('Error al cargar credenciales desde Neon:', err);
+    const { state } = await useMultiFileAuthState('/tmp/whatsapp-auth');
+    authState = state;
+  }
+
   const sock = makeWASocket({
-    auth: state,
+    auth: authState,
     printQRInTerminal: false,
-    qrTimeout: 5000, // Reducir a 5 segundos para evitar timeout de Vercel
-    connectTimeoutMs: 5000, // Reducir a 5 segundos
-    keepAliveIntervalMs: 10000, // Enviar keep-alive cada 10 segundos
+    qrTimeout: 5000,
+    connectTimeoutMs: 5000,
+    keepAliveIntervalMs: 10000,
     syncFullHistory: false,
+  });
+
+  // Guardar credenciales en Neon
+  sock.ev.on('creds.update', async () => {
+    const creds = JSON.stringify(authState.creds);
+    try {
+      await pgClient.query(
+        'INSERT INTO sessions (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = $2',
+        [sessionId, creds]
+      );
+      console.log('Credenciales guardadas en PostgreSQL');
+    } catch (err) {
+      console.error('Error al guardar credenciales:', err);
+    }
   });
 
   let qrAttempts = 0;
@@ -76,7 +116,7 @@ async function connectToWhatsApp() {
         sock.end();
         return;
       }
-      console.log(`Intento de QR ${qrAttempts}/${maxQRAattempts}. Escanea este QR con WhatsApp (número principal: 923838671):`);
+      console.log(`Intento de QR ${qrAttempts}/${maxQRAattempts}. Escanea este QR con WhatsApp (número principal: ${MAIN_NUMBER}):`);
       qrcode.generate(qr, { small: true }, (code) => {
         console.log('QR generado en los logs. Escanea con el número principal dentro de 5 segundos.');
         console.log(code);
@@ -84,7 +124,7 @@ async function connectToWhatsApp() {
     }
 
     if (connection === 'open') {
-      console.log('WhatsApp conectado. Número principal: 923838671');
+      console.log(`WhatsApp conectado. Número principal: ${MAIN_NUMBER}`);
       qrAttempts = 0;
       try {
         await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: 'Bot conectado exitosamente.' });
@@ -106,8 +146,6 @@ async function connectToWhatsApp() {
       }
     }
   });
-
-  sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('chats.set', async () => {
     try {
