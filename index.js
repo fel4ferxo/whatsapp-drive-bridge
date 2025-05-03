@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadContentFromMessage, BufferJSON } = require('baileys');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
