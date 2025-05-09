@@ -7,10 +7,8 @@ const { Client } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Variable para almacenar el QR
 let currentQR = null;
 
-// Ruta para mostrar el QR
 app.get('/qr', (req, res) => {
   if (currentQR) {
     res.send(`
@@ -18,17 +16,21 @@ app.get('/qr', (req, res) => {
       <p>Escanea este QR con WhatsApp (número principal: ${MAIN_NUMBER}) dentro de 30 segundos.</p>
     `);
   } else {
-    res.send('No hay código QR disponible. Espera a que se genere uno.');
+    res.send('No hay código QR disponible. Espera a que se genere uno o verifica si la sesión ya está activa.');
   }
+});
+
+app.get('/bridge', (req, res) => {
+  res.send('Puente de WhatsApp activo. Usa /qr para obtener el código QR.');
+});
+
+app.get('/ping', (req, res) => {
+  res.send('Servidor activo');
 });
 
 app.use((err, req, res, next) => {
   console.error('Error en el servidor:', err);
   res.status(500).send('Error interno del servidor');
-});
-
-app.get('/ping', (req, res) => {
-  res.send('Servidor activo');
 });
 
 app.use((req, res) => {
@@ -177,7 +179,7 @@ async function connectToWhatsApp() {
       qrcode.generate(qr, { small: true }, (code) => {
         console.log('QR generado en los logs. Escanea con el número principal dentro de 30 segundos.');
         console.log(code);
-        currentQR = code; // Almacena el QR para la ruta /qr
+        currentQR = code;
       });
     }
 
