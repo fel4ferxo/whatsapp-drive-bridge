@@ -7,6 +7,21 @@ const { Client } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Variable para almacenar el QR
+let currentQR = null;
+
+// Ruta para mostrar el QR
+app.get('/qr', (req, res) => {
+  if (currentQR) {
+    res.send(`
+      <pre>${currentQR}</pre>
+      <p>Escanea este QR con WhatsApp (número principal: ${MAIN_NUMBER}) dentro de 30 segundos.</p>
+    `);
+  } else {
+    res.send('No hay código QR disponible. Espera a que se genere uno.');
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error('Error en el servidor:', err);
   res.status(500).send('Error interno del servidor');
@@ -39,7 +54,7 @@ let isPaused = false;
 let isFirstConnection = true;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
-let isConnecting = false; // Bandera para evitar múltiples intentos de reconexión simultáneos
+let isConnecting = false;
 
 setInterval(() => {
   messageCountPerMinute = 0;
@@ -65,14 +80,12 @@ async function connectToWhatsApp() {
   }
   isConnecting = true;
 
-  // Conectar a PostgreSQL (Neon)
   const pgClient = new Client({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
   });
   await pgClient.connect();
 
-  // Cargar o inicializar sesiones desde Neon
   const sessionId = 'whatsapp_session';
   let authState;
   let saveCreds;
@@ -108,11 +121,11 @@ async function connectToWhatsApp() {
     printQRInTerminal: false,
     qrTimeout: 30000,
     connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 30000, // Reducido a 30 segundos para mantener la conexión viva más activamente
+    keepAliveIntervalMs: 30000,
     syncFullHistory: false,
     generateHighQualityLinkPreview: false,
     defaultQueryTimeoutMs: 60000,
-    markOnlineOnConnect: false, // Deshabilitar para reducir actividad sospechosa
+    markOnlineOnConnect: false,
     patchMessageBeforeSending: (message) => {
       const requiresPatch = !!(message.buttonsMessage || message.templateMessage || message.listMessage);
       if (requiresPatch) {
@@ -132,7 +145,6 @@ async function connectToWhatsApp() {
     },
   });
 
-  // Guardar credenciales en Neon
   sock.ev.on('creds.update', async () => {
     if (saveCreds) await saveCreds();
     const creds = JSON.stringify(sock.authState.creds, BufferJSON.replacer);
@@ -165,6 +177,7 @@ async function connectToWhatsApp() {
       qrcode.generate(qr, { small: true }, (code) => {
         console.log('QR generado en los logs. Escanea con el número principal dentro de 30 segundos.');
         console.log(code);
+        currentQR = code; // Almacena el QR para la ruta /qr
       });
     }
 
@@ -172,6 +185,7 @@ async function connectToWhatsApp() {
       console.log(`WhatsApp conectado. Número principal: ${MAIN_NUMBER}, Nueva sesión: ${isNewLogin}`);
       qrAttempts = 0;
       reconnectAttempts = 0;
+      currentQR = null;
       if (isFirstConnection) {
         try {
           await sock.sendMessage(`${SECONDARY_NUMBER}@s.whatsapp.net`, { text: 'Bot conectado exitosamente.' });
@@ -200,9 +214,9 @@ async function connectToWhatsApp() {
           isConnecting = false;
           return;
         }
-        const baseDelay = 15000; // Retraso base de 15 segundos
-        const exponentialBackoff = Math.pow(2, reconnectAttempts) * baseDelay; // Retraso exponencial
-        const reconnectDelay = Math.min(120000, exponentialBackoff); // Máximo 2 minutos
+        const baseDelay = 15000;
+        const exponentialBackoff = Math.pow(2, reconnectAttempts) * baseDelay;
+        const reconnectDelay = Math.min(120000, exponentialBackoff);
         console.log(`Intento de reconexión ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}. Esperando ${reconnectDelay / 1000} segundos antes de reconectar...`);
         await delay(reconnectDelay);
         connectToWhatsApp();
